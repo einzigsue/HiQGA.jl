@@ -2,3 +2,17 @@
 *.run
 *_temps.txt
 *.out
+Matplotlib_backend_issue_fix.txt
+FortranPractice
+MARE2DEM/libraries
+*.mod
+test_library.o
+*.c
+*.h
+*.o
+*.settings
+*.emdata
+*.penalty
+*.resistivity
+*.poly
+*.inc
