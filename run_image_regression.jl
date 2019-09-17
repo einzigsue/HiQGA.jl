@@ -1,56 +1,29 @@
-any(pwd() .== LOAD_PATH) || push!(LOAD_PATH, pwd())
-using ImageRegression, TransD_GP, MCMC_Driver, MPI, Distributed
+import MPI
 
-img = ImageRegression.Img(
-          filename         = "4.2.01.tiff",
-          dx               = 10.0,
-          fractrain        = 0.02,
-          dec              = 2,
-          gausskernelwidth = 7)
+# always initiate MPI with this:
+MPI.Init()
 
-d, sd, ftrain, Xtrain =  ImageRegression.get_training_data(img,
-                   sdmaxfrac = 0.05, 
-                   ybreak = 1000,
-                   takeevery = 4)
+comm = MPI.COMM_WORLD           # the default MPI communicator, which has all processors invoked with mpirun
+rank = MPI.Comm_rank(comm)     # the id (index) of this processor in communicator comm
+nprocs = MPI.Comm_size(comm)     # the total number of processors in the communicator group comm
 
-ImageRegression.plot_data(ftrain, Xtrain, img)
+# define number of PT chains, the temperature ladder, and the number of total MCMC samples
+nsamples, nchains, Tmax = 4001, 2, 2.5
+@assert mod(nprocs,nchains) == 0 # there should be the same whole number of procs per PT chain
+# create a team for each PT chain
+nProcPerTeam = Int(nprocs/nchains)
 
-Xall = ImageRegression.get_all_prediction_points(img)
+# this process' team number is:
+team = Integer(floor(rank/nProcPerTeam))
 
-opt_in = TransD_GP.Options(
-              nmin = 2,
-              nmax = 20,
-              xbounds           = [img.x[1] img.x[end];img.y[1] img.y[end]],
-              fbounds           = [-1 2],
-              xall              = Xall,
-              λ                 = [150.0, 150.0],
-              δ                 = 0.2,
-              demean            = true,
-              save_freq         = 500,
-              dispstatstoscreen = false,
-              sdev_prop         = 0.1,
-              sdev_pos          = [10.0, 10.0],
-              pnorm             = 2,
-              debug             = false,
-              fdataname         = "2Dtest_smooth"
-              )
+# define the worker captains (the "leader" threads of each team)
+WorkerCaptains = 0:nProcPerTeam:nprocs-1
 
-opt_EM_in  = MCMC_Driver.EMoptions(sd=sd)
+if in(rank,WorkerCaptains)
+    println("my rank is $rank, so I'm a worker captain!")
+    any(pwd() .== LOAD_PATH) || push!(LOAD_PATH, pwd())
+    using ImageRegression, TransD_GP, MCMC_Driver, Distributed
+end
 
-ImageRegression.calc_simple_RMS(d, img, opt_in, opt_EM_in, sd)
-
-# actual run of McMC
-nsamples, nchains, Tmax = 4001, 4, 2.5
-mgr = MPI.start_main_loop(MPI.MPI_TRANSPORT_ALL)
-
-addprocs(nchains)
-@info "workers are $(workers())"
-@everywhere any(pwd() .== LOAD_PATH) || push!(LOAD_PATH, pwd())
-@everywhere using Distributed
-@everywhere import MCMC_Driver
-@time MCMC_Driver.main(opt_in, d, Tmax, nsamples, opt_EM_in)
-
-rmprocs(workers())
-MPI.stop_main_loop(mgr)
-
-ImageRegression.plot_last_target_model(img, opt_in)
+# let's wrap things up
+MPI.Finalize()
