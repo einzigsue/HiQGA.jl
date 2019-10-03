@@ -12,7 +12,7 @@ rank = MPI.Comm_rank(comm)     # the id (index) of this processor in communicato
 nprocs = MPI.Comm_size(comm)     # the total number of processors in the communicator group comm
 
 # define number of PT chains, the temperature ladder, and the number of total MCMC samples
-nsamples, nchains, Tmax = 1, 4, 2.5
+nsamples, nchains, Tmax = 101, 4, 2.5
 @assert mod(nprocs,nchains) == 0 # there should be the same whole number of procs per PT chain
 # create a team for each PT chain
 nProcPerTeam = Int(nprocs/nchains)
@@ -78,7 +78,7 @@ if in(rank,WorkerCaptains)
                   λ                 = [150.0, 150.0],
                   δ                 = 0.2,
                   demean            = true,
-                  save_freq         = 500,
+                  save_freq         = 50,
                   dispstatstoscreen = false,
                   sdev_prop         = 0.1,
                   sdev_pos          = [10.0, 10.0],
@@ -100,6 +100,12 @@ elseif in(rank,WorkerCaptains) && rank != 0
     MCMC_Driver.main(opt_in, d, Tmax, nsamples, opt_EM_in, myMPIparams)
 end
 
+MPI.Barrier(comm)
+println(" ")
+
+if rank == 0
+    ImageRegression.plot_last_target_model(img, opt_in)
+end
 
 # let's wrap things up
 MPI.Finalize()

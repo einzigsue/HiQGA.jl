@@ -58,12 +58,12 @@ end
 
 function mh_step!(m::TransD_GP.Model, d::AbstractArray,
     opt::TransD_GP.Options, stat::TransD_GP.Stats,
-    Temp::Float64, movetype::Int, current_misfit::Array{Float64, 1}, opt_EM::EMoptions)
+    Temp::Float64, movetype::Int, current_misfit::Float64, opt_EM::EMoptions)
 
     new_misfit = get_misfit(m, d, opt, opt_EM)
-    logalpha = (current_misfit[1] - new_misfit)/Temp
+    logalpha = (current_misfit - new_misfit)/Temp
     if log(rand()) < logalpha
-        current_misfit[1] = new_misfit
+        current_misfit = new_misfit
         stat.accepted_moves[movetype] += 1
     else
         TransD_GP.undo_move!(movetype, m, opt)
@@ -71,11 +71,14 @@ function mh_step!(m::TransD_GP.Model, d::AbstractArray,
 end
 
 function do_mcmc_step(m::TransD_GP.Model, opt::TransD_GP.Options, stat::TransD_GP.Stats,
-    current_misfit::Array{Float64, 1}, d::AbstractArray,
-    Temp::Float64, isample::Int, opt_EM::EMoptions, wp::TransD_GP.Writepointers)
+    current_misfit::Float64, d::AbstractArray,
+    Temp::Float64, isample::Int, opt_EM::EMoptions, wp::TransD_GP.Writepointers,
+    myMPIparams::MCMC_Driver.MPIparams)
 
     # select move and do it
     movetype, priorviolate = TransD_GP.do_move!(m, opt, stat)
+
+    println("worker $(myMPIparams.rank) did move #$movetype, was it successful? $priorviolate")
 
     if !priorviolate
         mh_step!(m, d, opt, stat, Temp, movetype, current_misfit, opt_EM)
@@ -87,12 +90,13 @@ function do_mcmc_step(m::TransD_GP.Model, opt::TransD_GP.Options, stat::TransD_G
     # write models
     writemodel = false
     abs(Temp-1.0) < 1e-12 && (writemodel = true)
-    TransD_GP.write_history(isample, opt, m, current_misfit[1], stat, wp, writemodel)
+    TransD_GP.write_history(isample, opt, m, current_misfit, stat, wp, writemodel)
 
-    return current_misfit[1]
+    current_misfit = 0.0
+    return current_misfit
 end
 
-function do_mcmc_step(m::DArray{TransD_GP.Model}, opt::DArray{TransD_GP.Options},
+#=function do_mcmc_step(m::DArray{TransD_GP.Model}, opt::DArray{TransD_GP.Options},
     stat::DArray{TransD_GP.Stats}, current_misfit::DArray{Array{Float64, 1}},
     d::AbstractArray, Temp::Float64, isample::Int, opt_EM::DArray{EMoptions},
     wp::DArray{TransD_GP.Writepointers})
@@ -101,7 +105,7 @@ function do_mcmc_step(m::DArray{TransD_GP.Model}, opt::DArray{TransD_GP.Options}
                             localpart(current_misfit)[1], localpart(d),
                             Temp, isample, localpart(opt_EM)[1], localpart(wp)[1])
 
-end
+end=#
 
 function close_history(wp::DArray)
     @sync for (idx, pid) in enumerate(procs(wp))
@@ -256,12 +260,19 @@ function main(opt_in::TransD_GP.Options, din::AbstractArray, Tmax::Float64, nsam
         #end of parallel tempering swaps!
         #
 
-        
+        MPI.Barrier(comm)
+        println(" ")
+
+        #do one MCMC step
+        if in(myMPIparams.rank,myMPIparams.WorkerCaptains)
+            misfit = do_mcmc_step(m, opt_in, stat, misfit, din, T_local[1], isample, opt_EM_in, wp,
+                    myMPIparams)
+        end
 
     end # end of loop over nsamples
 
 
-end
+end # end of main
 
 function nicenup(g::PyPlot.Figure;fsize=14)
     for ax in gcf().axes
