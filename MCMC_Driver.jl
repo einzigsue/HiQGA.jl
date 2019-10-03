@@ -1,10 +1,32 @@
 module MCMC_Driver
 using TransD_GP, Distributed, DistributedArrays,
-     PyPlot, LinearAlgebra, Formatting
+     PyPlot, LinearAlgebra, Formatting, MPI, Statistics
 
 mutable struct EMoptions
     sd      :: Float64
     MLnoise :: Bool
+end
+
+mutable struct MPIparams
+    #comm            :: Int64
+    rank            :: Int64
+    nprocs          :: Int64
+    team            :: Int64
+    teamRank        :: Int64
+    WCindex         :: Int64
+    WorkerCaptains  :: Array{Int64,1}
+end
+
+function MPIparams(;
+    #comm,
+    rank,
+    nprocs,
+    team,
+    teamRank,
+    WCindex,
+    WorkerCaptains
+    )
+    MPIparams(rank,nprocs,team,teamRank,WCindex,WorkerCaptains)
 end
 
 function EMoptions(;
@@ -109,78 +131,136 @@ function close_temperature_file(fp::IOStream)
     close(fp)
 end
 
-function init_chain_darrays(opt_in::TransD_GP.Options, opt_EM_in::EMoptions, d_in::AbstractArray)
-    m_, opt_, stat_, opt_EM_, d_in_, current_misfit_, wp_  = map(x -> Array{Future, 1}(undef, nworkers()), 1:7)
+function init_chain_darrays(opt_in::TransD_GP.Options, opt_EM_in::EMoptions, d_in::AbstractArray,
+    myMPIparams::MCMC_Driver.MPIparams)
 
     costs_filename = "misfits_"*opt_in.fdataname
     fstar_filename = "models_"*opt_in.fdataname
     x_ftrain_filename = "points_"*opt_in.fdataname
 
-    @sync for(idx, pid) in enumerate(workers())
-        m_[idx]              = @spawnat pid [TransD_GP.init(opt_in)]
+    idx = myMPIparams.team + 1
 
-        opt_in.costs_filename    = costs_filename*"_$idx.bin"
-        opt_in.fstar_filename    = fstar_filename*"_$idx.bin"
-        opt_in.x_ftrain_filename = x_ftrain_filename*"_$idx.bin"
+    opt_in.costs_filename    = "misfits_"*opt_in.fdataname*"_$idx.bin"
+    opt_in.fstar_filename    = "models_"*opt_in.fdataname*"_$idx.bin"
+    opt_in.x_ftrain_filename = "points_"*opt_in.fdataname*"_$idx.bin"
 
-        opt_[idx]            = @spawnat pid [opt_in]
-        stat_[idx]           = @spawnat pid [TransD_GP.Stats()]
-        opt_EM_[idx]         = @spawnat pid [opt_EM_in]
-        d_in_[idx]           = @spawnat pid d_in
-        current_misfit_[idx] = @spawnat pid [[get_misfit(fetch(m_[idx])[1],
-                                              localpart(fetch(d_in_[idx])),
-                                              fetch(opt_[idx])[1],
-                                              fetch(opt_EM_[idx])[1])]]
-        wp_[idx]             = @spawnat pid [TransD_GP.open_history(opt_in)]
+    #println("my team: $(myMPIparams.team), $(opt_in.costs_filename)")
 
-    end
+    m = TransD_GP.init(opt_in)
+    stat = TransD_GP.Stats()
+    current_misfit = get_misfit(m, d_in, opt_in, opt_EM_in)
+    wp = TransD_GP.open_history(opt_in)
 
-    m, opt, stat, opt_EM, d,
-    current_misfit, wp       = map(x -> DArray(x), (m_, opt_, stat_, opt_EM_, d_in_, current_misfit_, wp_))
+    return m, stat, current_misfit, wp
+
 end
 
-function main(opt_in::TransD_GP.Options, din::AbstractArray, Tmax::Float64, nsamples::Int, opt_EM_in::EMoptions)
-    T = 10.0.^range(0, stop = log10(Tmax), length = nworkers())
+function main(opt_in::TransD_GP.Options, din::AbstractArray, Tmax::Float64, nsamples::Int, opt_EM_in::EMoptions,
+    myMPIparams::MCMC_Driver.MPIparams)
+    # reestablish these in this new scope, rather than pass them in as arguments
+    #=comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nprocs = MPI.Comm_size(comm)=#
 
-    misfit = zeros(Float64, length(T))
+    #println("$(myMPIparams.WorkerCaptains)")
 
-    fp_temps = open_temperature_file(opt_in::TransD_GP.Options, T)
-    m, opt, stat, opt_EM, d, current_misfit, wp = init_chain_darrays(opt_in, opt_EM_in, din[:])
-
-    t2 = time()
-    for isample = 1:nsamples
-
-        for ichain in nworkers():-1:2
-            jchain = rand(1:ichain)
-            if ichain != jchain
-                logalpha = (misfit[ichain] - misfit[jchain]) *
-                                (1.0/T[ichain] - 1.0/T[jchain])
-                if log(rand()) < logalpha
-                    T[ichain], T[jchain] = T[jchain], T[ichain]
-                end
-            end
-        end
-
-        @sync for(idx, pid) in enumerate(workers())
-            @async misfit[idx] = remotecall_fetch(do_mcmc_step, pid, m, opt, stat,
-                                    current_misfit, d,
-                                    T[idx], isample, opt_EM, wp)
-        end
-
-        write_temperatures(isample, T, fp_temps, opt_in)
-
-        if mod(isample-1, 1000) == 0
-            dt = time() - t2 #seconds
-            t2 = time()
-            @info("*****$dt**sec*****")
-        end
-
+    if myMPIparams.rank == 0
+        # establish temperature ladder for PT
+        T = 10.0.^range(0, stop = log10(Tmax), length = myMPIparams.nprocs)
+        # open the file for storing where the temperatures are at each step in MCMC
+        fp_temps = open_temperature_file(opt_in::TransD_GP.Options, T)
+        # this array will hold the aggregated misfits across all chains
+        misfitAll = zeros(length(T),1)
+        # for timing the algorithm
+        t2 = time()
     end
 
-    close_history(wp)
-    close_temperature_file(fp_temps.fp)
+    if in(myMPIparams.rank, myMPIparams.WorkerCaptains)
+        m, stat, misfit, wp = init_chain_darrays(opt_in, opt_EM_in, din[:], myMPIparams)
+        println("my rank is: $(myMPIparams.rank), misfit: $misfit")
+        println("$(myMPIparams.WorkerCaptains)")
+    end
 
-    nothing
+    comm = MPI.COMM_WORLD
+    MPI.Barrier(comm)
+
+    #main MCMC loop
+    for isample = 1:nsamples
+
+        #do PT chain swaps (actually, we're just swapping temperatures)
+        #first, get the misfits from the worker captains
+        if myMPIparams.rank == 0
+            for (idx,widx) in enumerate(myMPIparams.WorkerCaptains)
+                if widx != 0
+                    holder = zeros(1,1)
+                    println("preparing to receive from worker $widx...")
+                    MPI.Recv!(holder, widx, 0, comm)
+                    println("got message from worker $widx, here is misfit: $holder")
+                    misfitAll[idx] = holder[1]
+                end
+            end
+        elseif in(myMPIparams.rank,myMPIparams.WorkerCaptains) && myMPIparams.rank != 0
+            send_mesg = misfit
+            println("worker $(myMPIparams.rank) preparing to send message $misfit to manager...")
+            MPI.Send(send_mesg, 0, 0, comm)
+            println("message successfully sent from worker $(myMPIparams.rank)")
+        end
+
+        if myMPIparams.rank == 0
+            println("message passing over, here is the misfit vector")
+            println("$misfitAll")
+        end
+
+        MPI.Barrier(comm)
+        println(" ")
+
+        #next, perform the temperature swaps
+        if myMPIparams.rank == 0
+            println(" ")
+            println("original T: $T")
+            println(" ")
+            nchains = length(myMPIparams.WorkerCaptains)
+            for ichain = nchains:-1:2
+                jchain = rand(1:ichain) #now we have two swap candidates (ichain and jchain)
+                #do the swap so long as ichain and jchain aren't the same chain!
+                if ichain != jchain
+                    #log of the swap probability
+                    logalpha = (misfitAll[ichain] - misfitAll[jchain]) * (1.0/T[ichain] - 1.0/T[jchain])
+                    if log(rand()) < logalpha
+                        T[ichain], T[jchain] = T[jchain], T[ichain]
+                    end
+                end
+            end
+            println(" ")
+            println("final T: $T")
+            println(" ")
+            #finally, send the new temperatures to their respective chains
+            for (idx,widx) in enumerate(myMPIparams.WorkerCaptains)
+                if widx != 0
+                    send_mesg = T[idx]
+                    println("sending message $send_mesg to worker $widx")
+                    MPI.Send(send_mesg, widx, 0, comm)
+                elseif widx == 0
+                    T_local = zeros(1,1)
+                    T_local[1] = T[1]
+                end
+            end
+        elseif in(myMPIparams.rank,myMPIparams.WorkerCaptains) && myMPIparams.rank != 0
+            sleep(myMPIparams.rank*0.2)
+            println("worker $(myMPIparams.rank) waiting to receive message from manager...")
+            T_local = zeros(1,1)
+            MPI.Recv!(T_local, 0, 0, comm)
+            println("worker $(myMPIparams.rank) received message $T_local from manager")
+        end
+        #
+        #end of parallel tempering swaps!
+        #
+
+        
+
+    end # end of loop over nsamples
+
+
 end
 
 function nicenup(g::PyPlot.Figure;fsize=14)
