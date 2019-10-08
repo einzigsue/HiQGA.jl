@@ -60,14 +60,20 @@ function mh_step!(m::TransD_GP.Model, d::AbstractArray,
     opt::TransD_GP.Options, stat::TransD_GP.Stats,
     Temp::Float64, movetype::Int, current_misfit::Float64, opt_EM::EMoptions)
 
+    acceptflag = false
     new_misfit = get_misfit(m, d, opt, opt_EM)
+    #println("current misfit: $current_misfit; new_misfit: $new_misfit")
     logalpha = (current_misfit - new_misfit)/Temp
     if log(rand()) < logalpha
+        #println("we have updated the misfit from $current_misfit to $new_misfit")
         current_misfit = new_misfit
         stat.accepted_moves[movetype] += 1
+        acceptflag = true
     else
         TransD_GP.undo_move!(movetype, m, opt)
     end
+    #println("current misfit is now: $current_misfit")
+    return acceptflag, new_misfit
 end
 
 function do_mcmc_step(m::TransD_GP.Model, opt::TransD_GP.Options, stat::TransD_GP.Stats,
@@ -78,10 +84,22 @@ function do_mcmc_step(m::TransD_GP.Model, opt::TransD_GP.Options, stat::TransD_G
     # select move and do it
     movetype, priorviolate = TransD_GP.do_move!(m, opt, stat)
 
-    println("worker $(myMPIparams.rank) did move #$movetype, was it successful? $priorviolate")
+    #=if myMPIparams.rank == 0
+        println("worker $(myMPIparams.rank) did move #$movetype, did it violate the prior? $priorviolate")
+    end=#
 
+    #println("$(myMPIparams.rank): misfit before mh_step: $current_misfit")
+    old_misfit = current_misfit
+    acceptflag = false
     if !priorviolate
-        mh_step!(m, d, opt, stat, Temp, movetype, current_misfit, opt_EM)
+        acceptflag, current_misfit = mh_step!(m, d, opt, stat, Temp, movetype, current_misfit, opt_EM)
+    end
+    if acceptflag == true && myMPIparams.rank == 0
+        RMS = sqrt(2.0*current_misfit/sum(.!(isnan.(d))))
+        println("$(myMPIparams.rank): RMS = $RMS")
+        println("$(sum(.!(isnan.(d))))")
+        #println("$(myMPIparams.rank): misfit before/after mh_step: $old_misfit/$current_misfit")
+        #println("should be: $old_misfit/$new_misfit")
     end
 
     # acceptance stats
@@ -92,7 +110,6 @@ function do_mcmc_step(m::TransD_GP.Model, opt::TransD_GP.Options, stat::TransD_G
     abs(Temp-1.0) < 1e-12 && (writemodel = true)
     TransD_GP.write_history(isample, opt, m, current_misfit, stat, wp, writemodel)
 
-    current_misfit = 0.0
     return current_misfit
 end
 
@@ -138,9 +155,9 @@ end
 function init_chain_darrays(opt_in::TransD_GP.Options, opt_EM_in::EMoptions, d_in::AbstractArray,
     myMPIparams::MCMC_Driver.MPIparams)
 
-    costs_filename = "misfits_"*opt_in.fdataname
+    #=costs_filename = "misfits_"*opt_in.fdataname
     fstar_filename = "models_"*opt_in.fdataname
-    x_ftrain_filename = "points_"*opt_in.fdataname
+    x_ftrain_filename = "points_"*opt_in.fdataname=#
 
     idx = myMPIparams.team + 1
 
@@ -161,12 +178,6 @@ end
 
 function main(opt_in::TransD_GP.Options, din::AbstractArray, Tmax::Float64, nsamples::Int, opt_EM_in::EMoptions,
     myMPIparams::MCMC_Driver.MPIparams)
-    # reestablish these in this new scope, rather than pass them in as arguments
-    #=comm = MPI.COMM_WORLD
-    rank = MPI.Comm_rank(comm)
-    nprocs = MPI.Comm_size(comm)=#
-
-    #println("$(myMPIparams.WorkerCaptains)")
 
     if myMPIparams.rank == 0
         # establish temperature ladder for PT
@@ -181,8 +192,8 @@ function main(opt_in::TransD_GP.Options, din::AbstractArray, Tmax::Float64, nsam
 
     if in(myMPIparams.rank, myMPIparams.WorkerCaptains)
         m, stat, misfit, wp = init_chain_darrays(opt_in, opt_EM_in, din[:], myMPIparams)
-        println("my rank is: $(myMPIparams.rank), misfit: $misfit")
-        println("$(myMPIparams.WorkerCaptains)")
+        #=println("my rank is: $(myMPIparams.rank), misfit: $misfit")
+        println("$(myMPIparams.WorkerCaptains)")=#
     end
 
     comm = MPI.COMM_WORLD
@@ -197,32 +208,32 @@ function main(opt_in::TransD_GP.Options, din::AbstractArray, Tmax::Float64, nsam
             for (idx,widx) in enumerate(myMPIparams.WorkerCaptains)
                 if widx != 0
                     holder = zeros(1,1)
-                    println("preparing to receive from worker $widx...")
+                    #println("preparing to receive from worker $widx...")
                     MPI.Recv!(holder, widx, 0, comm)
-                    println("got message from worker $widx, here is misfit: $holder")
+                    #println("got message from worker $widx, here is misfit: $holder")
                     misfitAll[idx] = holder[1]
                 end
             end
         elseif in(myMPIparams.rank,myMPIparams.WorkerCaptains) && myMPIparams.rank != 0
             send_mesg = misfit
-            println("worker $(myMPIparams.rank) preparing to send message $misfit to manager...")
+            #println("worker $(myMPIparams.rank) preparing to send message $misfit to manager...")
             MPI.Send(send_mesg, 0, 0, comm)
-            println("message successfully sent from worker $(myMPIparams.rank)")
+            #println("message successfully sent from worker $(myMPIparams.rank)")
         end
 
-        if myMPIparams.rank == 0
+        #=if myMPIparams.rank == 0
             println("message passing over, here is the misfit vector")
             println("$misfitAll")
-        end
+        end=#
 
         MPI.Barrier(comm)
-        println(" ")
+        #println(" ")
 
         #next, perform the temperature swaps
         if myMPIparams.rank == 0
-            println(" ")
+            #=println(" ")
             println("original T: $T")
-            println(" ")
+            println(" ")=#
             nchains = length(myMPIparams.WorkerCaptains)
             for ichain = nchains:-1:2
                 jchain = rand(1:ichain) #now we have two swap candidates (ichain and jchain)
@@ -235,14 +246,14 @@ function main(opt_in::TransD_GP.Options, din::AbstractArray, Tmax::Float64, nsam
                     end
                 end
             end
-            println(" ")
+            #=println(" ")
             println("final T: $T")
-            println(" ")
+            println(" ")=#
             #finally, send the new temperatures to their respective chains
             for (idx,widx) in enumerate(myMPIparams.WorkerCaptains)
                 if widx != 0
                     send_mesg = T[idx]
-                    println("sending message $send_mesg to worker $widx")
+                    #println("sending message $send_mesg to worker $widx")
                     MPI.Send(send_mesg, widx, 0, comm)
                 elseif widx == 0
                     T_local = zeros(1,1)
@@ -251,22 +262,32 @@ function main(opt_in::TransD_GP.Options, din::AbstractArray, Tmax::Float64, nsam
             end
         elseif in(myMPIparams.rank,myMPIparams.WorkerCaptains) && myMPIparams.rank != 0
             sleep(myMPIparams.rank*0.2)
-            println("worker $(myMPIparams.rank) waiting to receive message from manager...")
+            #println("worker $(myMPIparams.rank) waiting to receive message from manager...")
             T_local = zeros(1,1)
             MPI.Recv!(T_local, 0, 0, comm)
-            println("worker $(myMPIparams.rank) received message $T_local from manager")
+            #println("worker $(myMPIparams.rank) received message $T_local from manager")
         end
         #
         #end of parallel tempering swaps!
         #
 
         MPI.Barrier(comm)
-        println(" ")
+        #println(" ")
 
         #do one MCMC step
         if in(myMPIparams.rank,myMPIparams.WorkerCaptains)
             misfit = do_mcmc_step(m, opt_in, stat, misfit, din, T_local[1], isample, opt_EM_in, wp,
                     myMPIparams)
+        end
+
+        if myMPIparams.rank == 0
+            write_temperatures(isample, T, fp_temps, opt_in)
+            #ImageRegression.plot_last_target_model(img, opt_in)
+            if mod(isample-1, 100) == 0
+                dt = time() - t2 #seconds
+                t2 = time()
+                @info("*****$dt**sec*****")
+            end
         end
 
     end # end of loop over nsamples
