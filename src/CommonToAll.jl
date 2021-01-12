@@ -188,7 +188,7 @@ end
 
 function getchi2forall(opt_in::TransD_GP.Options;
                         nchains         = 1,
-                        figsize         = (6,4),
+                        figsize         = (6,2.7),
                         fsize           = 8,
                         alpha           = 0.25,
                         nxticks         = 0,
@@ -215,11 +215,11 @@ function getchi2forall(opt_in::TransD_GP.Options;
         kacrosschains[:,ichain] = TransD_GP.history(opt, stat=:nodes)
         X2by2inchains[:,ichain] = TransD_GP.history(opt, stat=:U)
     end
-
+    isns == "s" ? (isns = "stationary") : (isns = "nonstationary")
     f, ax = plt.subplots(3,1, sharex=true, figsize=figsize)
     ax[1].plot(iters, kacrosschains, alpha=alpha)
     ax[1].set_xlim(extrema(iters)...)
-    ax[1].set_title(isns*" unsorted by temperature")
+    ax[1].set_title(isns*" chain samples")
     gridon && ax[1].grid()
     ax[1].set_ylabel("# nodes")
     ax[2].plot(iters, X2by2inchains, alpha=alpha)
@@ -240,29 +240,20 @@ function getchi2forall(opt_in::TransD_GP.Options;
         Tacrosschains[jstep,:] = Tacrosschains[jstep,sortidx]
     end
 
-    f, ax = plt.subplots(3,1, sharex=true, figsize=figsize)
+    f, ax = plt.subplots(2,1, sharex=true, figsize=figsize)
     nchainsatone = sum(Tacrosschains[1,:] .== 1)
     ax[1].plot(iters, kacrosschains, alpha=alpha)
     ax[1].set_xlim(extrema(iters)...)
     ax[1].set_ylabel("# nuclei")
-    ax[1].set_title(isns*" sorted by temperature")
+    ax[1].set_title(isns*" chain samples")
     ax[1].plot(iters, kacrosschains[:,1:nchainsatone], "k", alpha=alpha)
     gridon && ax[1].grid()
     ax[2].plot(iters, X2by2inchains, alpha=alpha)
     ax[2].plot(iters, X2by2inchains[:,1:nchainsatone], "k", alpha=alpha)
     ax[2].set_ylabel("-Log L")
     gridon && ax[2].grid()
-    ax[3].plot(iters, Tunsorted, alpha=alpha, color="gray")
-    # for i = 1:size(Tunsorted, 2)
-    #    for (j, s) = enumerate(Base.Iterators.cycle(lstyles))
-    #        j == i && (ax[3].plot(iters, Tunsorted, alpha=alpha/5, color="gray", linestyle=s); break)
-    #    end
-    # end
-    ax[3].set_ylabel("Temperature")
-    # ax[3].plot(iters, Tacrosschains[:,1:nchainsatone], "k", alpha=alpha)
-    gridon && ax[3].grid()
-    nxticks == 0 || ax[3].set_xticks(iters[1]:div(iters[end],nxticks):iters[end])
-    ax[3].set_xlabel("iterations")
+    nxticks == 0 || ax[2].set_xticks(iters[1]:div(iters[end],nxticks):iters[end])
+    ax[2].set_xlabel("iterations")
     nicenup(f, fsize=fsize)
 
 end
@@ -372,9 +363,12 @@ function plot_posterior(operator::Operator1D,
     burninfrac=0.5,
     qp1=0.05,
     qp2=0.95,
+    vmaxpc=1.0,
     cmappdf = "inferno",
     figsize=(10,5),
     pdfnormalize=false,
+    plotmode = false,
+    plotquantile = true,
     fsize=14)
     if temperaturenum == 1
         himage_ns, edges_ns, CI_ns = make1Dhist(optns, burninfrac=burninfrac, nbins = nbins, qp1=qp1, qp2=qp2,
@@ -389,20 +383,34 @@ function plot_posterior(operator::Operator1D,
     xall = opts.xall
     xmesh = vcat(xall[1:end-1] - diff(xall[:])/2, xall[end])
     # im1 = ax[1].imshow(himage_ns, extent=[edges_ns[1],edges_ns[end],xall[end],xall[1]], aspect="auto", cmap=cmappdf)
-    im1 = ax[1].pcolormesh(edges_ns[:], xmesh, himage_ns, cmap=cmappdf)
+    vmin, vmax = extrema(himage_ns)
+    vmax = vmin+vmaxpc*(vmax-vmin)
+    im1 = ax[1].pcolormesh(edges_ns[:], xmesh, himage_ns, cmap=cmappdf, vmax=vmax)
     cb1 = colorbar(im1, ax=ax[1])
     cb1.ax.set_xlabel("pdf \nns")
     # ax[1].grid()
     # im2 = ax[2].imshow(himage, extent=[edges[1],edges[end],xall[end],xall[1]], aspect="auto", cmap=cmappdf)
-    im2 = ax[2].pcolormesh(edges[:], xmesh, himage, cmap=cmappdf)
+    vmin, vmax = extrema(himage)
+    vmax = vmin+vmaxpc*(vmax-vmin)
+    im2 = ax[2].pcolormesh(edges[:], xmesh, himage, cmap=cmappdf, vmax=vmax)
     ax[2].set_ylim(extrema(xall)...)
     ax[2].invert_yaxis()
     cb2 = colorbar(im2, ax=ax[2])
     cb2.ax.set_xlabel("pdf \nstationary")
-    ax[1].plot(CI_ns, xall[:], linewidth=2, color="g", alpha=0.5)
-    ax[1].plot(CI_ns, xall[:], linewidth=2, color="c", linestyle="--", alpha=0.5)
-    ax[2].plot(CI, xall[:], linewidth=2, color="g", alpha=0.5)
-    ax[2].plot(CI, xall[:], linewidth=2, color="c", linestyle="--", alpha=0.5)
+    if plotmode
+        mode = vec([edges_ns[argmax(himage_ns[i,:])] for i in 1:size(himage_ns, 1)])
+        ax[1].plot(mode, xall[:], linewidth=3, color="w", alpha=0.5)
+        ax[1].plot(mode, xall[:], linewidth=2, color="k", alpha=0.5, "--")
+        mode = vec([edges[argmax(himage[i,:])] for i in 1:size(himage, 1)])
+        ax[2].plot(mode, xall[:], linewidth=3, color="w", alpha=0.5)
+        ax[2].plot(mode, xall[:], linewidth=2, color="k", alpha=0.5, "--")
+    end
+    if plotquantile
+        ax[1].plot(CI_ns, xall[:], linewidth=2, color="g", alpha=0.5)
+        ax[1].plot(CI_ns, xall[:], linewidth=2, color="c", linestyle="--", alpha=0.5)
+        ax[2].plot(CI, xall[:], linewidth=2, color="g", alpha=0.5)
+        ax[2].plot(CI, xall[:], linewidth=2, color="c", linestyle="--", alpha=0.5)
+    end
     ax[1].set_xlabel(L"\log_{10} \rho")
     ax[1].set_ylabel("depth (m)")
     ax[2].set_xlabel(L"\log_{10} λ")
@@ -419,6 +427,9 @@ function plot_posterior(operator::Operator1D,
     cmappdf = "inferno",
     figsize=(5,5),
     pdfnormalize=false,
+    plotmode = false,
+    plotquantile = true,
+    vmaxpc = 1.0,
     fsize=14)
     himage, edges, CI = make1Dhist(opt, burninfrac=burninfrac, nbins = nbins, qp1=qp1, qp2=qp2,
                                     pdfnormalize=pdfnormalize, temperaturenum=temperaturenum)
@@ -427,13 +438,22 @@ function plot_posterior(operator::Operator1D,
     #im1 = ax.imshow(himage, extent=[edges[1],edges[end],xall[end],xall[1]], aspect="auto", cmap=cmappdf)
     #ax.grid()
     xmesh = vcat(xall[1:end-1] - diff(xall[:])/2, xall[end])
-    im1 = ax.pcolormesh(edges[:], xmesh, himage, cmap=cmappdf)
+    vmin, vmax = extrema(himage)
+    vmax = vmin+vmaxpc*(vmax-vmin)
+    im1 = ax.pcolormesh(edges[:], xmesh, himage, cmap=cmappdf, vmax=vmax)
     ax.set_ylim(extrema(xall)...)
     ax.invert_yaxis()
     cb1 = colorbar(im1, ax=ax)
     cb1.ax.set_xlabel("pdf \nstationary")
-    ax.plot(CI, xall[:], linewidth=2, color="g", alpha=0.5)
-    ax.plot(CI, xall[:], linewidth=2, color="c", linestyle="--", alpha=0.5)
+    if plotmode
+        mode = vec([edges[argmax(himage[i,:])] for i in 1:size(himage, 1)])
+        ax.plot(mode, xall[:], linewidth=3, color="w", alpha=0.5)
+        ax.plot(mode, xall[:], linewidth=2, color="k", alpha=0.5, "--")
+    end
+    if plotquantile
+        ax.plot(CI, xall[:], linewidth=2, color="g", alpha=0.5)
+        ax.plot(CI, xall[:], linewidth=2, color="c", linestyle="--", alpha=0.5)
+    end
     ax.set_xlabel(L"\log_{10} \rho")
     ax.set_ylabel("depth (m)")
     nicenup(f, fsize=fsize)
@@ -565,6 +585,14 @@ function make1Dhists(opt_in::TransD_GP.Options, burninfrac::Real;
     ax2[4].set_ylim(0, 3*max(k...))
     ax2[4].set_ylabel("pdf")
     ax2[4].set_xlim(opt_in.nmin, opt_in.nmax)
+end
+
+function psnr(d, f)
+    r = vec(d)-vec(f)
+    a, b = extrema(d)
+    R² = b-a
+    n = length(r)
+    10*(log10(R²) - log10(r'r/n))
 end
 
 end

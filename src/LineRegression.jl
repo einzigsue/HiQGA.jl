@@ -38,7 +38,7 @@ function makehist(line::Line, opt::TransD_GP.Options;
         temperaturenum=temperaturenum, burninfrac=burninfrac)
     resids = similar(M)
     for (im, m) in enumerate(M)
-        resids[im] = m[sort(linidx)] - line.d[sort(linidx)]
+        resids[im] = (m[sort(linidx)] - line.d[sort(linidx)])/line.σ
     end
     resids = permutedims(hcat(resids...))
     mmin, mmax = extrema(resids)

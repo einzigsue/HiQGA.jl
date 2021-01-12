@@ -62,7 +62,7 @@ addprocs(nchains)
 @time MCMC_Driver.main(opt, optdummy, line, Tmax=Tmax, nsamples=nsamples, nchains=nchains, nchainsatone=nchainsatone)
 rmprocs(workers())
 ## plot
-GeophysOperator.getchi2forall(opt, fsize=8, alpha=0.5)
+GeophysOperator.getchi2forall(opt, fsize=8, alpha=1)
 r = ynoisy[linidx] - y[linidx]
 χ² = length(r)#r'*r/σ^2
 figure(1)
@@ -82,12 +82,24 @@ ax[1].plot(y, x, "--w", alpha=0.5)
 del = fbounds[2]-fbounds[1]
 ax[1].set_xlim(fbounds[1]-0.05del, fbounds[2]+0.05del,)
 savefig("jump1D_high.png", dpi=300)
-ax[1].set_ylim(0.35,0.45)
-p.set_alpha([0.5])
-p.set_sizes([35])
+# zoom in
+GeophysOperator.plot_posterior(line, opt,
+    burninfrac=0.25, figsize=(4,4), fsize=8, nbins=100, vmaxpc=0.6)
+ax = gcf().axes
+p = ax[1].scatter(ynoisy, x, c="w", alpha=0.2, s=25)
+ax[1].plot(y, x, "--w", alpha=0.5)
+del = fbounds[2]-fbounds[1]
+ax[1].set_xlim(fbounds[1]-0.05del, fbounds[2]+0.05del,)
+ax[1].set_ylim(0.37,0.42)
+p.set_alpha(0.6)
+p.set_sizes([60])
 gcf().text(0.02, 0.9, "a.", fontsize=14, color="red")
 ax[1].invert_yaxis()
 savefig("jump1D_high_zoom.png", dpi=300)
+# PSNR calculation
+M = GeophysOperator.assembleTat1(opt, :fstar, temperaturenum=1, burninfrac=0.25)
+m = mean(M)
+@info "Stationary PSNR is " GeophysOperator.CommonToAll.psnr(y,m)
 ## correlated residuals
 h, edges = GeophysOperator.makehist(line, opt)
 f, ax = plt.subplots(2,1, figsize=(4,3), sharex=true, sharey=true)
