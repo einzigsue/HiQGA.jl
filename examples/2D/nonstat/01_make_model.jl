@@ -2,7 +2,7 @@ using PyPlot, Distributed, Random
 using Revise, transD_GP
 ##
 img =     transD_GP.Img(
-          filename         = "4.2.01.png",
+          filename         = "examples/2D/nonstat/4.2.01.png",
           dx               = 10.0,
           fractrain        = 0.02,
           dec              = 2,

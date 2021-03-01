@@ -16,4 +16,6 @@ include("SkyTEM1DInversion.jl")
 using .SkyTEM1DInversion
 include("TEMPEST1DInversion.jl")
 using .TEMPEST1DInversion
+include("m2d_operator.jl")
+using .m2d_operator
 export Operator, get_misfit

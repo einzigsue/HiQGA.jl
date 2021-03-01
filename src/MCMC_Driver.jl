@@ -289,6 +289,29 @@ function main(opt_in       ::OptionsStat,
               nchainsatone = 1,
               Tmax         = 2.5)
 
+    chains = Chain(nchains, Tmax=Tmax, nchainsatone=nchainsatone)
+    m, mns, opt, optns, stat, statns,
+    F, current_misfit, wp, wpns, iterlast = init_chain_darrays(opt_in,
+                                                optns_in, F_in, chains)
+
+    domcmciters(iterlast, nsamples, chains, opt_in, mns, m, optns, opt,
+                statns, stat, current_misfit, F, wpns, wp)
+
+    close_history(wp)
+    close_history(wpns)
+    nothing
+end
+
+function main(opt_in       ::OptionsStat,
+              optns_in     ::OptionsNonstat,
+              F_in         ::Operator;
+              nsamples     = 4001,
+              nchains      = 1,
+              nchainsatone = 1,
+              Tmax         = 2.5,
+              m2d_flag     = true)
+
+    println("it's true! m2d_flag is $(m2d_flag)! We're in the right 'main'! :)")
 
     chains = Chain(nchains, Tmax=Tmax, nchainsatone=nchainsatone)
     m, mns, opt, optns, stat, statns,
