@@ -137,6 +137,7 @@ function OptionsNonstat(opt::OptionsStat;
 
         @assert all(diff(fbounds, dims=2) .> 0)
         @assert ndims(sdev_prop) == 1
+        # println("$(length(sdev_prop)) =? $(size(fbounds, 1))")
         @assert length(sdev_prop) == size(fbounds, 1)
         @assert ndims(sdev_pos) == 1
         @assert length(sdev_pos) == size(opt.xbounds, 1)
