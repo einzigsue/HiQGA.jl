@@ -1,4 +1,8 @@
 
+# To run this script:
+# 1. change to the "transD_GP directory (with /src, /examples, /misc, etc)"
+# 2. from the terminal, run: julia examples/GeminiMT/00_run_Gemini_allAtOnce.jl
+
 using Revise, transD_GP, Distributed, DelimitedFiles, Random
 using MPIClusterManagers, Distributed
 
@@ -85,7 +89,7 @@ println("Added procs $(procs())")
 Tmax = 1.2
 
 # make sure everyone has the right modules
-@everywhere using Distributed
+@everywhere using MPIClusterManagers, Distributed
 @everywhere using transD_GP
 @everywhere import MPI
 @everywhere import Mare2dem
@@ -98,11 +102,12 @@ Tmax = 1.2
 @everywhere filenameroot = "prism1.0"
 @everywhere nprocperchain = Int(nproc/nchains)
 @mpi_do manager load_m2d(filenameroot,nprocperchain)
+@mpi_do manager typeof(M2d)
 println("we made it out of the load_m2d call!")
 
 @time transD_GP.main(optlog10λ, opt, m2d_op,
                      Tmax=Tmax, nsamples=nsamples, nchains=nchains, nchainsatone=nchainsatone,
-                     m2d_flag=true)
+                     m2d_flag=true, manager=manager)
 
 rmprocs(workers())
 println("Exiting")

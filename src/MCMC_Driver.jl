@@ -1,4 +1,4 @@
-using Distributed, DistributedArrays,
+using MPIClusterManagers, Distributed, DistributedArrays,
      PyPlot, LinearAlgebra, Formatting
 
 struct Tpointer
@@ -267,6 +267,71 @@ function init_chain_darrays(opt_in::OptionsStat,
             wp, wpns, iterlast
 end
 
+function init_chain_darrays(opt_in::OptionsStat,
+                            optns_in::OptionsNonstat,
+                            F_in::Operator, chains::Array{Chain, 1},
+                            manager::MPIManager)
+    m_, mns_, opt_, optns_, F_in_, stat_, statns_, d_in_,
+    current_misfit_, wp_, wpns_  = map(x -> Array{Future, 1}(undef, length(chains)), 1:11)
+
+    costs_filename = "misfits_"*opt_in.fdataname
+    fstar_filename = "models_"*opt_in.fdataname
+    x_ftrain_filename = "points_"*opt_in.fdataname
+
+    iterlast = 0
+    @sync for(idx, chain) in enumerate(chains)
+
+        opt_in.costs_filename      = costs_filename*"s_$idx.bin"
+        optns_in.costs_filename    = costs_filename*"ns_$idx.bin"
+        opt_in.fstar_filename      = fstar_filename*"s_$idx.bin"
+        optns_in.fstar_filename    = fstar_filename*"ns_$idx.bin"
+        opt_in.x_ftrain_filename   = x_ftrain_filename*"s_$idx.bin"
+        optns_in.x_ftrain_filename = x_ftrain_filename*"ns_$idx.bin"
+
+        opt_[idx]            = @spawnat chain.pid [opt_in]
+        optns_[idx]          = @spawnat chain.pid [optns_in]
+
+        m_[idx]                = @spawnat chain.pid [init(opt_in)]
+        mns_[idx]              = @spawnat chain.pid [init(optns_in,
+                                                            fetch(m_[idx])[1])]
+
+        @sync wp_[idx]             = @spawnat chain.pid [open_history(opt_in)]
+        #@info "sending $(optns_in.costs_filename)"
+        @sync wpns_[idx]           = @spawnat chain.pid [open_history(optns_in)]
+
+        stat_[idx]           = @spawnat chain.pid [Stats()]
+        statns_[idx]         = @spawnat chain.pid [Stats()]
+
+        F_in_[idx]           = @spawnat chain.pid [F_in]
+        if opt_in.updatenonstat
+            println("before forward call...")
+            @mpi_do manager begin
+                response, current_misfit_[idx] = m2d_fwd(nprocperchain,M2d)
+            end
+            println("after forward call!")
+        else
+            println("before forward call...")
+            @mpi_do manager begin
+                response, current_misfit_[idx] = m2d_fwd(nprocsperchain,M2d)
+            end
+            println("after forward call!")
+        end
+        if opt_in.history_mode=="a"
+            if idx == length(chains)
+                iterlast = history(opt_in, stat=:iter)[end]
+            end
+            chains[idx].T = history(opt_in, stat=:T)[end]
+        end
+    end
+    m, mns, opt, optns, stat, statns, F,
+    current_misfit, wp, wpns = map(x -> DArray(x), (m_, mns_, opt_, optns_,
+                                    stat_, statns_, F_in_, current_misfit_,
+                                    wp_, wpns_))
+
+    return m, mns, opt, optns, stat, statns, F, current_misfit,
+            wp, wpns, iterlast
+end
+
 function swap_temps(chains::Array{Chain, 1})
     for ichain in length(chains):-1:2
         jchain = rand(1:ichain)
@@ -309,14 +374,18 @@ function main(opt_in       ::OptionsStat,
               nchains      = 1,
               nchainsatone = 1,
               Tmax         = 2.5,
-              m2d_flag     = true)
+              m2d_flag     = true,
+              manager      ::MPIManager)
 
     println("it's true! m2d_flag is $(m2d_flag)! We're in the right 'main'! :)")
+    println("type of manager: $(typeof(manager))")
+
+    @mpi_do manager println("Hi there!")
 
     chains = Chain(nchains, Tmax=Tmax, nchainsatone=nchainsatone)
     m, mns, opt, optns, stat, statns,
     F, current_misfit, wp, wpns, iterlast = init_chain_darrays(opt_in,
-                                                optns_in, F_in, chains)
+                                                optns_in, F_in, chains, manager)
 
     domcmciters(iterlast, nsamples, chains, opt_in, mns, m, optns, opt,
                 statns, stat, current_misfit, F, wpns, wp)
