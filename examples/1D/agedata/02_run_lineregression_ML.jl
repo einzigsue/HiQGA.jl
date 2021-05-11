@@ -1,7 +1,7 @@
 ## switch on ML nosie estimator
 line.useML = true
 ## make options for the lengthscale GP
-log10bounds = [1 3]
+log10bounds = [1.3 3]
 δlog10λ = 0.1
 nminlog10λ, nmaxlog10λ = 2, 400
 pnorm = 2.
@@ -58,8 +58,8 @@ opt = transD_GP.OptionsNonstat(optlog10λ,
                         K = K,
                         )
 ## set up McMC
-nsamples, nchains, nchainsatone = 100001, 8, 1
-Tmax = 2.50
+nsamples, nchains, nchainsatone = 500001, 12, 1
+Tmax = 2.0
 addprocs(nchains)
 @info "workers are $(workers())"
 @everywhere using Distributed
@@ -71,9 +71,9 @@ rmprocs(workers())
 transD_GP.getchi2forall(opt, fsize=8, alpha=0.5)
 transD_GP.getchi2forall(optlog10λ, fsize=8, alpha=0.5)
 transD_GP.plot_posterior(line, opt, optlog10λ,
-    burninfrac=0.5, figsize=(11.5,11.5), fsize=8, nbins=100, vmaxpc=0.5, cmappdf="bone")
+    burninfrac=0.5, figsize=(10,10), fsize=8, nbins=100, cmappdf="bone")
 ax=gcf().axes
-p = ax[1].scatter(Y, X, c="orange", alpha=0.05, s=2)
+p = ax[1].scatter(Y, X, c="orange", alpha=0.2, s=2)
 del = fbounds[2]-fbounds[1]
 ax[1].set_xlim(fbounds[1]-0.05del, fbounds[2]+0.05del,)
 savefig("jump1D_ns.png", dpi=300)
