@@ -101,8 +101,9 @@ Tmax = 1.2
 @everywhere include("src/m2d.jl")
 @everywhere filenameroot = "prism1.0"
 @everywhere nprocperchain = Int(nproc/nchains)
-@mpi_do manager load_m2d(filenameroot,nprocperchain)
-@mpi_do manager typeof(M2d)
+@mpi_do manager M2d = load_m2d(filenameroot,nprocperchain)
+# @mpi_do manager println("type of M2d = $(typeof(M2d))")
+# @mpi_do manager println("first of M2d.log10rhofree = $(M2d.log10rhofree[1])")
 println("we made it out of the load_m2d call!")
 
 @time transD_GP.main(optlog10λ, opt, m2d_op,

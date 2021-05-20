@@ -304,17 +304,28 @@ function init_chain_darrays(opt_in::OptionsStat,
 
         F_in_[idx]           = @spawnat chain.pid [F_in]
         if opt_in.updatenonstat
-            println("before forward call...")
+            println("idx=$idx: before nonstat forward call...")
             @mpi_do manager begin
-                response, current_misfit_[idx] = m2d_fwd(nprocperchain,M2d)
+                # println("M2d = $(M2d)")
+                # response, current_misfit_[idx] = m2d_fwd(nprocperchain,M2d)
+                response, chi2misfit = m2d_fwd(nprocperchain,M2d)
+                comm  = MPI.COMM_WORLD
+                rank  = MPI.Comm_rank(comm)
+                nproc = MPI.Comm_size(comm)
+                team  = Integer(floor(rank/nprocperchain))
+                comm_team    = MPI.Comm_split(comm,team,rank)
+                rank_team    = MPI.Comm_rank(comm_team)
+                # println("my rank is $rank, my team is $team, and my team rank is $rank_team")
             end
-            println("after forward call!")
+            println("after nonstat forward call!")
         else
-            println("before forward call...")
+            println("idx=$idx: before stat forward call...")
             @mpi_do manager begin
-                response, current_misfit_[idx] = m2d_fwd(nprocsperchain,M2d)
+                # println("M2d = $(M2d)")
+                # response, current_misfit_[idx] = m2d_fwd(nprocsperchain,M2d)
+                response, chi2misfit = m2d_fwd(nprocperchain,M2d)
             end
-            println("after forward call!")
+            println("after stat forward call!")
         end
         if opt_in.history_mode=="a"
             if idx == length(chains)
@@ -378,9 +389,9 @@ function main(opt_in       ::OptionsStat,
               manager      ::MPIManager)
 
     println("it's true! m2d_flag is $(m2d_flag)! We're in the right 'main'! :)")
-    println("type of manager: $(typeof(manager))")
+    # println("type of manager: $(typeof(manager))")
 
-    @mpi_do manager println("Hi there!")
+    # @mpi_do manager println("Hi there!")
 
     chains = Chain(nchains, Tmax=Tmax, nchainsatone=nchainsatone)
     m, mns, opt, optns, stat, statns,
