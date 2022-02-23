@@ -29,4 +29,6 @@ using .TEMPEST1DInversion
 include("MT1D.jl")
 using .MT1D
 include("MT1DInversion.jl")
+include("SMRPI.jl")
+using .SMRPI
 export Operator, get_misfit, Sounding, makeoperator, make_tdgp_opt, getresidual
