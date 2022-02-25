@@ -13,6 +13,7 @@ t = Vector{Float64}()
 zstart = 1.
 extendfrac, dz = 1.028, 1
 zall, znall, zboundaries = transD_GP.setupz(zstart, extendfrac, dz=dz, n=50, showplot=true)
+gcf()
 ##
 w = 0.01 * ones(length(zboundaries))
 w[zboundaries .> 30 .&& zboundaries .< 45] .= 0.5
