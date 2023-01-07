@@ -71,25 +71,42 @@ It is also useful to use Revise.jl to ensure changes to the package are immediat
 #PBS -l storage=gdata/z67+gdata/kb5
 ```
 ### Installing MPI.jl and MPIClusterManagers.jl on NCI
-We have found that the safest bet for MPI.jl to work without [UCX issues](https://docs.juliahub.com/MPI/nO0XF/0.19.2/knownissues/#UCX) on NCI is to use intel-mpi. A bunch of [environment variables](https://docs.juliahub.com/MPI/nO0XF/0.19.2/configuration/#environment_variables) need to be set before building MPI.jl and MPIClusterManagers.jl. Goto your Julia depot (should be softlinked as `~/.julia`) and edit `~/.julia/prefs/MPI.toml` to enter the following lines:
-```
-path = "/apps/intel-mpi/2019.8.254/intel64/"
-library = "/apps/intel-mpi/2019.8.254/intel64/lib/release/libmpi.so"
-binary = "system"
-```
-Now ensure you do a 
+We have found that the safest bet for MPI.jl to work without [UCX issues](https://docs.juliahub.com/MPI/nO0XF/0.19.2/knownissues/#UCX) on NCI is to use intel-mpi. 
+
+From MPI.jl v0.20, it uses MPIPreferences.jl to configure the system-provided MPI backend. Load the intel-mpi module to the environment
 ```
 module load intel-mpi/2019.8.254
 ```
-before running Julia and doing
+before running Julia and install MPIPreferences.jl first
 ```
-pkg>add MPI, MPIClusterManagers, Distributed
+pkg>add MPIPreferences
+julia > using MPIPreferences
+julia > MPIPreferences.use_system_binary(;library_names=["/apps/intel-mpi/2019.8.254/intel64/lib/release/libmpi.so"],mpiexec="mpiexec",abi="MPICH",export_prefs=true,force=true)
+┌ Info: MPI implementation identified
+│   libmpi = "/apps/intel-mpi/2019.8.254/intel64/lib/release/libmpi.so"
+│   version_string = "Intel(R) MPI Library 2019 Update 8 for Linux* OS\n"
+│   impl = "IntelMPI"
+│   version = v"2019.8.0"
+└   abi = "MPICH"
+┌ Info: MPIPreferences changed
+│   binary = "system"
+│   libmpi = "/apps/intel-mpi/2019.8.254/intel64/lib/release/libmpi.so"
+│   abi = "MPICH"
+└   mpiexec = "mpiexec"
 ```
-Just to be safe, ensure that MPI has indeed built wth the version you have specified above:
+Once the configuration is in place, install MPI.jl and MPIClusterManagers.jl
 ```
-Julia>using Pkg; Pkg.build("MPI", verbose=true)
+pkg> add MPI, MPIClusterManagers
 ```
-and you should see linking information to intel-mpi 2019.8.254. To test, use an interactive NCI job with the following submission:
+Just to be safe, double check whether MPI.jl uses the MPI implementation provided by the intel-mpi module:
+```
+julia> using MPI
+julia> MPI.MPI_LIBRARY
+"IntelMPI"
+julia> MPI.MPI_LIBRARY_VERSION
+v"2019.8.0"
+```
+To test, use an interactive NCI job with the following submission:
 ```
 qsub -I -lwalltime=1:00:00,mem=16GB,ncpus=4,storage=gdata/z67+gdata/cr78
 .
